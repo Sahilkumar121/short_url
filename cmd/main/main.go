@@ -1,0 +1,79 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"log/slog"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/Sahilkumar121/short_url/internal/config"
+	"github.com/Sahilkumar121/short_url/internal/database"
+	"github.com/Sahilkumar121/short_url/internal/handler"
+	"github.com/Sahilkumar121/short_url/internal/middleware"
+	"github.com/Sahilkumar121/short_url/internal/repo"
+	"github.com/Sahilkumar121/short_url/internal/service"
+)
+
+func main() {
+
+	// logger set
+	loggerHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     slog.LevelError,
+		AddSource: true,
+	})
+	logger := slog.New(loggerHandler)
+	slog.SetDefault(logger)
+
+	// config load
+	cfg, err := config.MustLoad()
+	if err != nil {
+		log.Fatalf("error occur %v", err)
+	}
+
+	// database connection
+	pgDb, err := database.Connect(cfg.DB)
+	if err != nil {
+		log.Fatalf("error occur %v", err)
+	}
+
+	defer pgDb.Close()
+
+	mux := http.NewServeMux()
+
+	// repository
+	Repo := repo.NewURLRepositoryHandler(pgDb)
+
+	// service
+	urlService := service.NewURLService(Repo)
+	userService := service.NewUserService(Repo)
+
+	// api handler
+	healthHandler := handler.NewHealthHandler(logger)
+	urlHandler := handler.NewUrlHandler(logger, urlService)
+	userHandler := handler.NewUserHandler(logger, userService, cfg)
+
+	// api
+	mux.HandleFunc("GET /api/v1/healthz", healthHandler.GetHealth)
+	mux.HandleFunc("GET /api/v1/url/longurl/{short_code}", urlHandler.GetLongUrl)
+	mux.HandleFunc("POST /api/v1/user/login", userHandler.LoginUser)
+	mux.HandleFunc("POST /api/v1/user/register", userHandler.RegisterUser)
+
+	mux.Handle("POST /api/v1/url/shortcode", middleware.OptionalAuthMiddleware([]byte(cfg.SecretKey), http.HandlerFunc(urlHandler.GetShortCode)))
+	mux.Handle("GET /api/v1/user/me", middleware.AuthMiddleware([]byte(cfg.SecretKey), http.HandlerFunc(userHandler.GetUserDetail)))
+
+	requestIDmiddleware := middleware.RequestIdMiddleware(mux)
+	server := http.Server{
+		Addr:         ":" + cfg.Port,
+		Handler:      requestIDmiddleware,
+		ReadTimeout:  1 * time.Minute,
+		WriteTimeout: 1 * time.Minute,
+		IdleTimeout:  30 * time.Second,
+	}
+
+	fmt.Println("Server is running...")
+	if err := server.ListenAndServe(); err != nil {
+		return
+	}
+}
