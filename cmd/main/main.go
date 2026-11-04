@@ -43,11 +43,12 @@ func main() {
 	mux := http.NewServeMux()
 
 	// repository
-	Repo := repo.NewURLRepositoryHandler(pgDb)
+	urlRepo := repo.NewURLRepositoryHandler(pgDb)
+	userRepo := repo.NewUserRepositoryHandler(pgDb)
 
 	// service
-	urlService := service.NewURLService(Repo)
-	userService := service.NewUserService(Repo)
+	urlService := service.NewURLService(urlRepo)
+	userService := service.NewUserService(userRepo)
 
 	// api handler
 	healthHandler := handler.NewHealthHandler(logger)
