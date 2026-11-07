@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Sahilkumar121/short_url/internal/cache"
 	"github.com/Sahilkumar121/short_url/internal/config"
 	"github.com/Sahilkumar121/short_url/internal/database"
 	"github.com/Sahilkumar121/short_url/internal/email"
@@ -19,13 +20,14 @@ import (
 	"github.com/Sahilkumar121/short_url/internal/repo"
 	"github.com/Sahilkumar121/short_url/internal/service"
 	"github.com/Sahilkumar121/short_url/internal/worker"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 func main() {
 
 	// logger set
 	loggerHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     slog.LevelError,
+		Level:     slog.LevelInfo,
 		AddSource: true,
 	})
 	logger := slog.New(loggerHandler)
@@ -34,18 +36,20 @@ func main() {
 	// config load
 	cfg, err := config.MustLoad()
 	if err != nil {
-		log.Fatalf("error occur %v", err)
+		log.Fatalf("Configuration error:  %v", err)
 	}
+	logger.Info("Configuration loaded successfully...")
 
 	// database connection
 	pgDb, err := database.Connect(cfg.DB)
 	if err != nil {
-		log.Fatalf("error occur %v", err)
+		log.Fatalf("database connection error:  %v", err)
 	}
+	logger.Info("Database loaded successfully...")
 
 	defer pgDb.Close()
 
-	// smtp hanlder
+	// smtp handler
 	emailSender := email.NewSMTPHandler(cfg)
 
 	// email worker handler
@@ -53,16 +57,49 @@ func main() {
 	if err := emailWorker.Start(); err != nil {
 		log.Fatalf("error starting email worker %v", err)
 	}
+
+	logger.Info("Email worker started successfully...")
+
 	defer emailWorker.Close()
 
 	mux := http.NewServeMux()
+
+	// redis setup
+	redisClient := goredis.NewClient(&goredis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.RedisDB,
+
+		DialTimeout:  2 * time.Second,
+		ReadTimeout:  500 * time.Millisecond,
+		WriteTimeout: 500 * time.Millisecond,
+	})
+
+	defer redisClient.Close()
+
+	// check is redis is connected
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+
+	err = redisClient.Ping(ctx).Err()
+
+	cancel()
+
+	if err != nil {
+		log.Fatalf("redis is unavailable %v", err)
+	} else {
+		logger.Info("Redis connected Successfully...")
+
+	}
+
+	// redis handler
+	redisHandler := cache.NewRedisCache(redisClient, 30*time.Minute)
 
 	// repository
 	urlRepo := repo.NewURLRepositoryHandler(pgDb)
 	userRepo := repo.NewUserRepositoryHandler(pgDb)
 
 	// service
-	urlService := service.NewURLService(urlRepo)
+	urlService := service.NewURLService(urlRepo, redisHandler, logger)
 	userService := service.NewUserService(userRepo, emailWorker, logger)
 
 	// api handler
@@ -92,6 +129,7 @@ func main() {
 		context.Background(),
 		os.Interrupt, syscall.SIGTERM,
 	)
+
 	defer stop()
 
 	go func() {
@@ -105,7 +143,7 @@ func main() {
 		}
 	}()
 
-	logger.Info("server is running", "port", cfg.Port)
+	logger.Info("Server is running", "port", cfg.Port)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server failed", "err", err)
 	}

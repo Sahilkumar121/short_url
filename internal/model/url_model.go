@@ -15,6 +15,6 @@ type URL struct {
 	CreatedAt *time.Time `json:"created_at"`
 }
 
-type UrlRequest struct {
+type UrlLongUrl struct {
 	LongUrl string `json:"long_url"`
 }

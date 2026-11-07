@@ -41,13 +41,13 @@ func (h *PostgresqlURLRepositoryHandler) FindByLongURL(ctx context.Context, long
 }
 
 // FindByShortCode: return URL if short code exist
-func (h *PostgresqlURLRepositoryHandler) FindByShortCode(ctx context.Context, shortCode string) (*model.URL, error) {
+func (h *PostgresqlURLRepositoryHandler) FindByShortCode(ctx context.Context, shortCode string) (*model.UrlLongUrl, error) {
 
-	query := `select id, long_url, short_code, created_at from urls where short_code = $1`
+	query := `select long_url from urls where short_code = $1`
 	rows := h.DB.QueryRow(ctx, query, shortCode)
 
-	var url model.URL
-	err := rows.Scan(&url.Id, &url.LongUrl, &url.ShortCode, &url.CreatedAt)
+	var url model.UrlLongUrl
+	err := rows.Scan(&url.LongUrl)
 	if err != nil {
 		return nil, err
 	}

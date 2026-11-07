@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/Sahilkumar121/short_url/internal/httpx"
@@ -11,18 +12,28 @@ import (
 type URLRepository interface {
 	FindByLongURL(ctx context.Context, longUrl string) (*model.URL, bool, error)
 
-	FindByShortCode(ctx context.Context, shortCode string) (*model.URL, error)
+	FindByShortCode(ctx context.Context, shortCode string) (*model.UrlLongUrl, error)
 
 	Create(ctx context.Context, url *model.URL) error
 }
 
-type URLService struct {
-	Repo URLRepository
+type RedisCache interface {
+	Get(ctx context.Context, shortCode string) (string, bool, error)
+	Set(ctx context.Context, shortCode string, longUrl string) error
+	Delete(ctx context.Context, shortCode string) error
 }
 
-func NewURLService(repo URLRepository) *URLService {
+type URLService struct {
+	Repo   URLRepository
+	Redis  RedisCache
+	Logger *slog.Logger
+}
+
+func NewURLService(repo URLRepository, redis RedisCache, logger *slog.Logger) *URLService {
 	return &URLService{
-		Repo: repo,
+		Repo:   repo,
+		Redis:  redis,
+		Logger: logger,
 	}
 }
 
@@ -64,15 +75,37 @@ func (h *URLService) CreateShortCode(ctx context.Context, longUrl string) (*mode
 	return newURL, nil
 }
 
-func (h *URLService) GenerateLongUrl(ctx context.Context, shortCode string) (*model.URL, error) {
+func (h *URLService) FindLongUrl(ctx context.Context, shortCode string) (*model.UrlLongUrl, error) {
 
 	// check if short code was provided
 	if strings.TrimSpace(shortCode) == "" {
 		return nil, httpx.ErrBadRequest
 	}
 
+	// check in redis
+	if h.Redis != nil {
+		longUrl, found, err := h.Redis.Get(ctx, shortCode)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if found {
+			return &model.UrlLongUrl{
+				LongUrl: longUrl,
+			}, nil
+		}
+	}
+
+	h.Logger.Info("no data found in redis, redirecting to database")
+
 	// check if short code exist
 	existing, err := h.Repo.FindByShortCode(ctx, shortCode)
+	if err != nil {
+		return nil, err
+	}
+
+	err = h.Redis.Set(ctx, shortCode, existing.LongUrl)
 	if err != nil {
 		return nil, err
 	}

@@ -28,7 +28,7 @@ func NewUrlHandler(logger *slog.Logger, service *service.URLService) *UrlHandler
 func (h *UrlHandler) GetShortCode(w http.ResponseWriter, r *http.Request) {
 
 	// url request data
-	var req model.UrlRequest
+	var req model.UrlLongUrl
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.Logger.Error("failed decode error", "err", err, "code", 400)
 		httpx.HandleError(w, http.StatusBadRequest, "please provide long url", httpx.ErrBadRequest)
@@ -54,7 +54,7 @@ func (h *UrlHandler) GetLongUrl(w http.ResponseWriter, r *http.Request) {
 
 	req := r.PathValue("short_code")
 
-	url, err := h.Service.GenerateLongUrl(r.Context(), req)
+	url, err := h.Service.FindLongUrl(r.Context(), req)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.HandleError(w, http.StatusNotFound, "No row found", httpx.ErrNotFound)
