@@ -2,11 +2,18 @@ package service
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/Sahilkumar121/short_url/internal/httpx"
 	"github.com/Sahilkumar121/short_url/internal/model"
 	"github.com/Sahilkumar121/short_url/internal/security"
 )
+
+type UserService struct {
+	Repo     UserRepository
+	notifier LoginNotifier
+	Logger   *slog.Logger
+}
 
 type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
@@ -14,13 +21,15 @@ type UserRepository interface {
 	RegisterUserInDatabase(ctx context.Context, userReq *model.UserRegisterRequest) error
 }
 
-type UserService struct {
-	Repo UserRepository
+type LoginNotifier interface {
+	NotifyLogin(email, name string) error
 }
 
-func NewUserService(repo UserRepository) *UserService {
+func NewUserService(repo UserRepository, notifier LoginNotifier, logger *slog.Logger) *UserService {
 	return &UserService{
-		Repo: repo,
+		Repo:     repo,
+		notifier: notifier,
+		Logger:   logger,
 	}
 }
 
@@ -39,6 +48,10 @@ func (h *UserService) CheckLoginCredential(ctx context.Context, userReq *model.U
 	ok := security.VerifyPassword(userReq.Password, exist.Password)
 	if !ok {
 		return nil, httpx.ErrForbidden
+	}
+
+	if err := h.notifier.NotifyLogin(exist.Email, exist.Name); err != nil {
+		h.Logger.Error("failed to enque the email notification", "user", exist.Email, "err", err)
 	}
 
 	return exist, nil

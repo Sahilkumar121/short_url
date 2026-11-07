@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -125,4 +126,14 @@ func (w *EmailWorker) Enqueue(job EmailJob) error {
 	default:
 		return errors.New("queue is full")
 	}
+}
+
+func (w *EmailWorker) NotifyLogin(email, name string) error {
+	job := EmailJob{
+		To:      email,
+		Subject: "New login to ShortUrl account",
+		Body:    fmt.Sprintf("Hello %s, \n\nYour account was successfully logged in.", name),
+	}
+
+	return w.Enqueue(job)
 }

@@ -12,15 +12,13 @@ import (
 	"github.com/Sahilkumar121/short_url/internal/middleware"
 	"github.com/Sahilkumar121/short_url/internal/model"
 	"github.com/Sahilkumar121/short_url/internal/service"
-	"github.com/Sahilkumar121/short_url/internal/worker"
 	"github.com/jackc/pgx/v5"
 )
 
 type UserHandler struct {
-	Logger      *slog.Logger
-	Service     *service.UserService
-	Config      config.Config
-	EmailSender *worker.EmailSender
+	Logger  *slog.Logger
+	Service *service.UserService
+	Config  config.Config
 }
 
 func NewUserHandler(logger *slog.Logger, service *service.UserService, config config.Config) *UserHandler {
@@ -69,13 +67,6 @@ func (h *UserHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		httpx.HandleError(w, http.StatusInternalServerError, "something went wrong", httpx.ErrInternalServer)
 		return
 	}
-
-	// created a job
-	// _ := worker.EmailJob{
-	// 	To:      exist.Email,
-	// 	Subject: "Login successfully",
-	// 	Body:    "Welcome to our short url website",
-	// }
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

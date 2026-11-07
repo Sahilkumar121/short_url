@@ -1,19 +1,24 @@
 package main
 
 import (
-	"fmt"
+	"context"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/Sahilkumar121/short_url/internal/config"
 	"github.com/Sahilkumar121/short_url/internal/database"
+	"github.com/Sahilkumar121/short_url/internal/email"
 	"github.com/Sahilkumar121/short_url/internal/handler"
 	"github.com/Sahilkumar121/short_url/internal/middleware"
 	"github.com/Sahilkumar121/short_url/internal/repo"
 	"github.com/Sahilkumar121/short_url/internal/service"
+	"github.com/Sahilkumar121/short_url/internal/worker"
 )
 
 func main() {
@@ -40,6 +45,16 @@ func main() {
 
 	defer pgDb.Close()
 
+	// smtp hanlder
+	emailSender := email.NewSMTPHandler(cfg)
+
+	// email worker handler
+	emailWorker := worker.NewEmailWorker(emailSender, logger)
+	if err := emailWorker.Start(); err != nil {
+		log.Fatalf("error starting email worker %v", err)
+	}
+	defer emailWorker.Close()
+
 	mux := http.NewServeMux()
 
 	// repository
@@ -48,7 +63,7 @@ func main() {
 
 	// service
 	urlService := service.NewURLService(urlRepo)
-	userService := service.NewUserService(userRepo)
+	userService := service.NewUserService(userRepo, emailWorker, logger)
 
 	// api handler
 	healthHandler := handler.NewHealthHandler(logger)
@@ -73,8 +88,25 @@ func main() {
 		IdleTimeout:  30 * time.Second,
 	}
 
-	fmt.Println("Server is running...")
-	if err := server.ListenAndServe(); err != nil {
-		return
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt, syscall.SIGTERM,
+	)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Error("server shutdown failed", "err", err)
+		}
+	}()
+
+	logger.Info("server is running", "port", cfg.Port)
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("server failed", "err", err)
 	}
 }
