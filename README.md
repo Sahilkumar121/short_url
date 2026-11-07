@@ -1,72 +1,89 @@
 # Short URL
 
-A URL shortener backend written in Go. It exposes a small REST API to register users, log in with JWT, and turn long URLs into 7-character short codes. Guests can create short codes too; logged-in users are identified through an optional auth middleware.
+A URL shortener backend written in Go. It exposes a REST API to register users, authenticate with JWT, and convert long URLs into 7-character short codes.
+
+Guests can create short URLs without authentication. Logged-in users are identified through optional authentication middleware, allowing their URLs to be associated with their accounts.
+
+The application uses PostgreSQL for persistent storage and Redis for caching URL redirection data. It also implements asynchronous email notifications using SMTP and Go channels.
 
 ## Features
 
-- Short code generation (7 chars, base62, cryptographically secure via `crypto/rand`)
-- User registration and login with JWT (HS256) bearer tokens
-- Optional authentication on short code creation (guests allowed, bad tokens rejected)
-- Protected `/user/me` endpoint
-- Request ID middleware (`X-Request-ID` is reused if sent, generated otherwise)
-- Structured JSON logging with `log/slog`
-- PostgreSQL with a `pgx` connection pool
-- Database migrations with `golang-migrate`
-- Layered architecture: handler → service → repository
+- **Short code generation:** 7-character Base62 codes generated securely using `crypto/rand`.
+- **User registration and login:** Password hashing and JWT authentication using HS256.
+- **Optional authentication:** Guests can create short URLs, while invalid or expired tokens are rejected.
+- **Protected user endpoint:** Retrieve authenticated user details through `/user/me`.
+- **Request ID middleware:** Reuses an incoming `X-Request-ID` or generates a new one.
+- **Structured logging:** JSON logging using Go's `log/slog`.
+- **PostgreSQL:** Persistent storage using `pgx` and `pgxpool`.
+- **Database migrations:** Schema management using `golang-migrate`.
+- **Asynchronous email notifications:** Sends login notification emails through an SMTP worker implemented using Go channels.
+- **Redis caching:** Caches resolved URLs to reduce repeated PostgreSQL queries.
+- **Layered architecture:** Separates HTTP handlers, business logic, and database operations.
 
 ## Tech Stack
 
-| Area       | Library                                  |
-| ---------- | ---------------------------------------- |
-| HTTP       | `net/http` (Go 1.22+ `ServeMux` routing) |
-| Database   | PostgreSQL, `jackc/pgx/v5` (`pgxpool`)   |
-| Auth       | `golang-jwt/jwt/v5`                      |
-| Migrations | `golang-migrate/migrate/v4`              |
-| Config     | `joho/godotenv`                          |
-| IDs        | `google/uuid`                            |
+| Area | Library / Technology |
+|---|---|
+| HTTP | `net/http` (Go 1.22+ ServeMux routing) |
+| Database | PostgreSQL, `jackc/pgx/v5` (`pgxpool`) |
+| Authentication | `golang-jwt/jwt/v5` |
+| Password hashing | Argon2id |
+| Migrations | `golang-migrate/migrate/v4` |
+| Configuration | `joho/godotenv` |
+| IDs | `google/uuid` |
+| Caching | Redis, `redis/go-redis/v9` |
+| Email | SMTP (Mailtrap for development) |
+| Background processing | Go channels and goroutines |
+| Logging | `log/slog` |
 
 ## Project Structure
 
-```
+```text
 ├── bin
-│   └── main
+│   └── main
 ├── cmd
-│   ├── main
-│   │   └── main.go
-│   └── migration
-│       └── migration.go
+│   ├── main
+│   │   └── main.go
+│   └── migration
+│       └── migration.go
 ├── go.mod
 ├── go.sum
 ├── internal
-│   ├── auth                                      # creating access token and vcalidate it
-│   │   └── token.go
-│   ├── config                                    # checks all config is present or not
-│   │   └── config.go
-│   ├── database                                  # postgresql connection
-│   │   └── database.go
-│   ├── handler                                   # api gateway
-│   │   ├── health.go
-│   │   ├── url_handler.go
-│   │   └── user_handler.go
-│   ├── httpx                                     # custom error handler
-│   │   └── error.go
-│   ├── middleware                                # to add requestId and check is user authenticated or not
-│   │   ├── auth.go
-│   │   └── requestID.go
-│   ├── model                                     # user and url tables
-│   │   ├── url_model.go
-│   │   └── user_model.go
-│   ├── repo                                       # all daatabase query
-│   │   ├── url_repository.go
-│   │   └── user_repository.go
-│   ├── security                                    # encode and decode the password
-│   │   └── password.go
-│   └── service # all business logic
-│       ├── short_code.go
-│       ├── url_service.go
-│       └── user_service.go
+│   ├── auth
+│   │   └── token.go
+│   ├── cache
+│   │   └── redis.go
+│   ├── config
+│   │   └── config.go
+│   ├── database
+│   │   └── database.go
+│   ├── email
+│   │   └── SMTP email implementation
+│   ├── handler
+│   │   ├── health.go
+│   │   ├── url_handler.go
+│   │   └── user_handler.go
+│   ├── httpx
+│   │   └── error.go
+│   ├── middleware
+│   │   ├── auth.go
+│   │   └── requestID.go
+│   ├── model
+│   │   ├── url_model.go
+│   │   └── user_model.go
+│   ├── repo
+│   │   ├── url_repository.go
+│   │   └── user_repository.go
+│   ├── security
+│   │   └── password.go
+│   ├── service
+│   │   ├── short_code.go
+│   │   ├── url_service.go
+│   │   └── user_service.go
+│   └── worker
+│       └── Email worker implementation
 ├── Makefile
-└── migrations                                       # all database operations
+└── migrations
     ├── 0001_create_table_urls.down.sql
     ├── 0001_create_table_urls.up.sql
     ├── 0002_create_table_user.down.sql
@@ -81,63 +98,260 @@ A URL shortener backend written in Go. It exposes a small REST API to register u
 
 - Go 1.22 or newer
 - PostgreSQL
+- Redis
+- SMTP credentials (Mailtrap or another SMTP provider)
+- Make
 
-### 1. Clone
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/Sahilkumar121/short_url.git
 cd short_url
 ```
 
-### 2. Configure environment
+### 2. Configure environment variables
 
-Create a `.env` file in the project root. All three values are required; the app exits on startup if any is missing.
+Create a `.env` file in the project root.
 
 ```env
 PORT=8080
-DATABASE=your-database-url
+
+# PostgreSQL
+DATABASE=your-postgresql-connection-string
+
+# JWT
 SECRETKEY=replace-with-a-long-random-secret
+
+# SMTP
+SMTP_HOST=sandbox.smtp.mailtrap.io
+SMTP_PORT=2525
+SMTP_USERNAME=your-smtp-username
+SMTP_PASSWORD=your-smtp-password
+
+# Redis
+REDIS_ADDR=localhost:6379
+REDIS_PASS=
+REDIS_DB=0
 ```
 
-| Variable    | Description                         |
-| ----------- | ----------------------------------- |
-| `PORT`      | Port the server listens on          |
-| `DATABASE`  | PostgreSQL connection string        |
-| `SECRETKEY` | Secret used to sign and verify JWTs |
+| Variable | Description |
+|---|---|
+| `PORT` | HTTP server port |
+| `DATABASE` | PostgreSQL connection string |
+| `SECRETKEY` | Secret used to sign and validate JWTs |
+| `SMTP_HOST` | SMTP server hostname |
+| `SMTP_PORT` | SMTP server port |
+| `SMTP_USERNAME` | SMTP authentication username |
+| `SMTP_PASSWORD` | SMTP authentication password |
+| `REDIS_ADDR` | Redis server address |
+| `REDIS_PASS` | Redis password (optional for local Redis) |
+| `REDIS_DB` | Redis database index |
 
-### 3. Run migrations
+For Neon PostgreSQL, use the connection string provided by Neon, including its required SSL parameters.
 
-The migration runner reads files from the `migrations/` directory.
+For local Redis, the default address is `localhost:6379`. When running the application inside Docker, use the Redis service hostname instead.
+
+**Important:** Add `.env` to `.gitignore`. Never commit database passwords, SMTP credentials, or JWT secrets.
+
+### 3. Start Redis
+
+You can run Redis using Docker:
 
 ```bash
-make migrate-up      # apply all migrations
-make migrate-down    # roll back one step
+docker run --name short-url-redis \
+  -p 6379:6379 \
+  -d redis:7-alpine
 ```
 
-### 4. Start the server
+Check whether Redis is responding:
+
+```bash
+docker exec -it short-url-redis redis-cli ping
+```
+
+Expected output:
+
+```text
+PONG
+```
+
+### 4. Run database migrations
+
+The migration runner reads SQL files from the `migrations/` directory.
+
+```bash
+make migrate-up
+```
+
+To roll back the most recent migration:
+
+```bash
+make migrate-down
+```
+
+### 5. Start the server
 
 ```bash
 make run
 ```
 
-The API is then available at `http://localhost:<PORT>/api/v1`.
+The API is available at:
+
+```text
+http://localhost:8080/api/v1
+```
+
+## Email Notification Implementation
+
+The application implements asynchronous email notifications using SMTP, Go channels, and goroutines.
+
+Instead of sending an email directly inside the login HTTP request, the application uses a background email worker.
+
+### How it works
+
+1. A user submits their login credentials.
+2. The service validates the user's email and password.
+3. When authentication succeeds, the service submits a login notification to the email worker.
+4. The worker processes the notification through a Go channel.
+5. The SMTP handler sends the email to the user.
+6. Email errors are logged without changing the successful login result.
+
+### Architecture
+
+```text
+Login Request
+     |
+     v
+User Handler
+     |
+     v
+User Service
+     |
+     +---- Validate Credentials
+     |
+     v
+Login Notification
+     |
+     v
+Email Worker
+     |
+     v
+Go Channel
+     |
+     v
+SMTP Handler
+     |
+     v
+User Email
+```
+
+The email worker is started during application startup and closed when the application shuts down.
+
+This approach keeps SMTP operations out of the main login request flow and separates notification processing from authentication business logic.
+
+## Redis Caching Implementation
+
+Redis is integrated as an in-memory cache for URL resolution.
+
+PostgreSQL remains the primary storage system, while Redis stores frequently accessed short-code mappings to reduce database queries.
+
+### How URL caching works
+
+When a client requests a long URL using a short code:
+
+1. The application checks Redis for the requested short code.
+2. If the data exists in Redis, the cached long URL is returned.
+3. If the data is not found in Redis, the application queries PostgreSQL.
+4. Once PostgreSQL returns the URL, the application stores the mapping in Redis.
+5. The cached entry expires automatically after 30 minutes.
+
+### Cache flow
+
+```text
+Client Request
+      |
+      v
+Get Long URL
+      |
+      v
+Check Redis
+      |
+      +------ Cache Hit ------> Return Long URL
+      |
+      |
+      +------ Cache Miss
+                    |
+                    v
+              PostgreSQL
+                    |
+                    v
+               Get Long URL
+                    |
+                    v
+               Store in Redis
+                    |
+                    v
+              Return Long URL
+```
+
+### Redis configuration
+
+The application uses:
+
+```go
+redisClient := redis.NewClient(&redis.Options{
+    Addr:     cfg.Redis.Addr,
+    Password: cfg.Redis.Password,
+    DB:       cfg.Redis.RedisDB,
+})
+```
+
+The cache TTL is configured as:
+
+```go
+redisHandler := cache.NewRedisCache(
+    redisClient,
+    30*time.Minute,
+)
+```
+
+The cache uses a key prefix to identify URL redirection entries:
+
+```text
+shortCode:redirect:{short_code}
+```
+
+### Benefits of Redis
+
+- Reduces repeated PostgreSQL queries for frequently accessed URLs.
+- Provides fast in-memory lookups.
+- Automatically expires cached entries through TTL.
+- Keeps persistent URL data in PostgreSQL.
+
+A cache miss falls back to PostgreSQL. Redis connection and command failures are currently surfaced by the URL service, so transparent fallback during a Redis outage is a future improvement.
 
 ## API Reference
 
-Base path: `/api/v1`
+Base path:
 
-| Method | Endpoint                    | Auth     | Description                        |
-| ------ | --------------------------- | -------- | ---------------------------------- |
-| GET    | `/healthz`                  | None     | Health check                       |
-| POST   | `/user/register`            | None     | Create an account                  |
-| POST   | `/user/login`               | None     | Log in and receive a JWT           |
-| GET    | `/user/me`                  | Required | Get the current user               |
-| POST   | `/url/shortcode`            | Optional | Create a short code for a long URL |
-| GET    | `/url/longurl/{short_code}` | None     | Resolve a short code to its URL    |
+```text
+/api/v1
+```
+
+| Method | Endpoint | Authentication | Description |
+|---|---|---|---|
+| GET | `/healthz` | None | Health check |
+| POST | `/user/register` | None | Register a new user |
+| POST | `/user/login` | None | Login and receive JWT |
+| GET | `/user/me` | Required | Retrieve current user |
+| POST | `/url/shortcode` | Optional | Create a short code |
+| GET | `/url/longurl/{short_code}` | None | Resolve short code to long URL |
 
 ### Register
 
 `POST /api/v1/user/register`
+
+Request:
 
 ```json
 {
@@ -147,15 +361,21 @@ Base path: `/api/v1`
 }
 ```
 
-Responses: `201 Created`, `400 Bad Request`, `409 Conflict` (user already exists)
+Responses: `201 Created`, `400 Bad Request`, `409 Conflict`.
+
+Successful response:
 
 ```json
-{ "message": "register successful" }
+{
+  "message": "register successful"
+}
 ```
 
 ### Login
 
 `POST /api/v1/user/login`
+
+Request:
 
 ```json
 {
@@ -164,25 +384,33 @@ Responses: `201 Created`, `400 Bad Request`, `409 Conflict` (user already exists
 }
 ```
 
-Responses: `200 OK`, `400 Bad Request`, `403 Forbidden` (invalid credentials), `404 Not Found`
+Responses: `200 OK`, `400 Bad Request`, `403 Forbidden`, `404 Not Found`.
+
+Successful response:
 
 ```json
 {
-  "message": "loging successful",
+  "message": "login successful",
   "token": "<jwt>",
   "token-type": "Bearer"
 }
 ```
 
-Tokens expire after **15 minutes**.
+Tokens expire after 15 minutes.
+
+A login notification is submitted to the asynchronous email worker after successful authentication.
 
 ### Get current user
 
 `GET /api/v1/user/me`
 
-```
+Authorization header:
+
+```text
 Authorization: Bearer <jwt>
 ```
+
+Response:
 
 ```json
 {
@@ -196,65 +424,108 @@ Authorization: Bearer <jwt>
 
 `POST /api/v1/url/shortcode`
 
-The `Authorization` header is optional. With no header the request is treated as a guest; with an invalid or expired token it is rejected with `401`.
+The Authorization header is optional.
+
+Without a token, the request is treated as a guest request. With a valid token, the URL can be associated with the authenticated user. Invalid or expired tokens are rejected with `401 Unauthorized`.
+
+Request:
 
 ```json
-{ "long_url": "https://example.com/some/very/long/path" }
+{
+  "long_url": "https://example.com/some/very/long/path"
+}
 ```
 
+Response:
+
 ```json
-{ "short_code": "aB3xK9Z" }
+{
+  "short_code": "aB3xK9Z"
+}
 ```
 
 ### Resolve a short code
 
 `GET /api/v1/url/longurl/{short_code}`
 
-```json
-{ "long_url": "https://example.com/some/very/long/path" }
+Example:
+
+```text
+GET /api/v1/url/longurl/aB3xK9Z
 ```
 
-Returns `404 Not Found` if the code does not exist.
+Response:
+
+```json
+{
+  "long_url": "https://example.com/some/very/long/path"
+}
+```
+
+Returns `404 Not Found` if the short code does not exist.
+
+Redis is checked before PostgreSQL to avoid unnecessary database queries.
 
 ## Example Usage
 
+### Register
+
 ```bash
-# register
 curl -X POST http://localhost:8080/api/v1/user/register \
   -H "Content-Type: application/json" \
   -d '{"name":"Sahil","email":"sahil@example.com","password":"secret123"}'
+```
 
-# login
+### Login
+
+```bash
 curl -X POST http://localhost:8080/api/v1/user/login \
   -H "Content-Type: application/json" \
   -d '{"email":"sahil@example.com","password":"secret123"}'
+```
 
-# create a short code (add -H "Authorization: Bearer <token>" to create it as a user)
+### Create a short code
+
+```bash
 curl -X POST http://localhost:8080/api/v1/url/shortcode \
   -H "Content-Type: application/json" \
   -d '{"long_url":"https://example.com/some/very/long/path"}'
+```
 
-# resolve it
+To create the URL as an authenticated user, add:
+
+```bash
+-H "Authorization: Bearer <token>"
+```
+
+### Resolve a short code
+
+```bash
 curl http://localhost:8080/api/v1/url/longurl/aB3xK9Z
 ```
 
 ## Authentication Details
 
-- Algorithm: HS256, with the signing method enforced during validation
-- Issuer: `my-app` (checked on every request)
-- Expiry: 15 minutes, and a token without an expiry is rejected
-- Subject (`sub`): the user's UUID, placed into the request context by the middleware
+- Algorithm: HS256.
+- Signing method is enforced during token validation.
+- Issuer: `my-app`.
+- Expiry: 15 minutes.
+- Tokens without an expiration claim are rejected.
+- Subject (`sub`): User UUID.
+- The middleware stores the authenticated user's ID in the request context.
 
 ## Server Configuration
 
-| Setting       | Value      |
-| ------------- | ---------- |
-| Read timeout  | 1 minute   |
-| Write timeout | 1 minute   |
-| Idle timeout  | 30 seconds |
-| DB max conns  | 25         |
-| DB conn idle  | 30 minutes |
-| DB conn life  | 1 hour     |
+| Setting | Value |
+|---|---|
+| Read timeout | 1 minute |
+| Write timeout | 1 minute |
+| Idle timeout | 30 seconds |
+| Shutdown timeout | 10 seconds |
+| DB max connections | 25 |
+| DB connection idle time | 30 minutes |
+| DB connection lifetime | 1 hour |
+| Redis cache TTL | 30 minutes |
 
 ## Roadmap
 
@@ -263,9 +534,11 @@ curl http://localhost:8080/api/v1/url/longurl/aB3xK9Z
 - [ ] Short code expiry and custom aliases
 - [ ] Rate limiting
 - [ ] Refresh tokens
+- [ ] More resilient Redis outage fallback
 - [ ] Dockerfile and docker-compose
-- [ ] Tests and CI
+- [ ] Unit and integration tests
+- [ ] CI/CD pipeline
 
 ## License
 
-Add a license of your choice (for example MIT).
+Add a license of your choice (for example, MIT).
