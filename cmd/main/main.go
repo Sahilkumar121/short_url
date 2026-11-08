@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -38,14 +39,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("Configuration error:  %v", err)
 	}
+
+	fmt.Println("======================Configuration======================")
 	logger.Info("Configuration loaded successfully...")
+	fmt.Println("==================================================================")
+	fmt.Println()
 
 	// database connection
 	pgDb, err := database.Connect(cfg.DB)
 	if err != nil {
 		log.Fatalf("database connection error:  %v", err)
 	}
+	fmt.Println("====================== Database ======================")
 	logger.Info("Database loaded successfully...")
+	fmt.Println("==================================================================")
+	fmt.Println()
 
 	defer pgDb.Close()
 
@@ -53,12 +61,14 @@ func main() {
 	emailSender := email.NewSMTPHandler(cfg)
 
 	// email worker handler
+	fmt.Println("====================== Email Worker ======================")
 	emailWorker := worker.NewEmailWorker(emailSender, logger)
 	if err := emailWorker.Start(); err != nil {
 		log.Fatalf("error starting email worker %v", err)
 	}
-
 	logger.Info("Email worker started successfully...")
+	fmt.Println("==================================================================")
+	fmt.Println()
 
 	defer emailWorker.Close()
 
@@ -87,8 +97,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("redis is unavailable %v", err)
 	} else {
+		fmt.Println("================================== Redis ==================================")
 		logger.Info("Redis connected Successfully...")
-
+		fmt.Println("========================================================")
+		fmt.Println()
 	}
 
 	// redis handler
@@ -142,8 +154,11 @@ func main() {
 			logger.Error("server shutdown failed", "err", err)
 		}
 	}()
-
+	fmt.Println("================================= Server =================================")
 	logger.Info("Server is running", "port", cfg.Port)
+	fmt.Println("==================================================================")
+	fmt.Println()
+
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server failed", "err", err)
 	}

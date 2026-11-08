@@ -160,7 +160,7 @@ You can run Redis using Docker:
 ```bash
 docker run --name short-url-redis \
   -p 6379:6379 \
-  -d redis:7-alpine
+  -d redis
 ```
 
 Check whether Redis is responding:

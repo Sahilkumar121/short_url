@@ -1,0 +1,12 @@
+.idea
+.vscode
+.env
+.env.*
+*.log
+.idea/
+.vscode/
+
+.DS_Store
+Thumbs.db
+
+bin/
